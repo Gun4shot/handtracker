@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Hand Controlled 3D Object</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: #222; color: #eee; font-family: sans-serif; }
+    video {
+      position: absolute;
+      left: 10px;
+      bottom: 10px;
+      width: 200px;
+      opacity: 0.8;
+      border: 2px solid #555;
+      border-radius: 8px;
+    }
+    #gestureHint {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      padding: 10px 15px;
+      background: rgba(0,0,0,0.6);
+      border-radius: 8px;
+      font-size: 18px;
+      user-select: none;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+
+<video id="video" autoplay playsinline></video>
+<div id="gestureHint">No gesture</div>
+
+<!-- MediaPipe Hands -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+<!-- Three.js -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.158.0/examples/js/loaders/GLTFLoader.js"></script>
+
+
+<script src="script.js"></script>
+</body>
+</html>
