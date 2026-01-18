@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hand Controlled 3D Object</title>
+  <style>
+    body { 
+      margin: 0; 
+      overflow: hidden; 
+      background: #222; 
+      color: #eee; 
+      font-family: sans-serif; 
+    }
+    video {
+      position: absolute;
+      left: 10px;
+      bottom: 10px;
+      width: 200px;
+      opacity: 0.8;
+      border: 2px solid #555;
+      border-radius: 8px;
+      z-index: 10;
+    }
+    #gestureHint {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      padding: 10px 15px;
+      background: rgba(0,0,0,0.6);
+      border-radius: 8px;
+      font-size: 18px;
+      user-select: none;
+      pointer-events: none;
+      z-index: 10;
+    }
+    #controls {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      padding: 10px 15px;
+      background: rgba(0,0,0,0.6);
+      border-radius: 8px;
+      font-size: 14px;
+      color: #aaa;
+      max-width: 250px;
+      z-index: 10;
+    }
+    #uploadContainer {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      padding: 30px;
+      background: rgba(0,0,0,0.85);
+      border-radius: 12px;
+      text-align: center;
+      z-index: 100;
+      border: 2px dashed #555;
+    }
+    #uploadContainer.hidden {
+      display: none;
+    }
+    #fileInput {
+      display: none;
+    }
+    #uploadButton {
+      padding: 12px 24px;
+      background: #4a90e2;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      cursor: pointer;
+      margin-top: 15px;
+    }
+    #uploadButton:hover {
+      background: #357abd;
+    }
+    #errorMessage {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 15px 20px;
+      background: rgba(255,0,0,0.9);
+      border-radius: 8px;
+      color: white;
+      display: none;
+      z-index: 20;
+      max-width: 80%;
+    }
+  </style>
+</head>
+<body>
+
+<div id="uploadContainer">
+  <h2>📦 Upload Your 3D Model</h2>
+  <p>Select a GLB or GLTF file from your computer</p>
+  <input type="file" id="fileInput" accept=".glb,.gltf" />
+  <button id="uploadButton">Choose GLB File</button>
+</div>
+
+<video id="video" autoplay playsinline></video>
+<div id="gestureHint">Upload a model to begin</div>
+<div id="controls">
+  <strong>Controls:</strong><br />
+  🤏 Pinch to zoom in<br />
+  ✊ Fist to zoom out<br />
+  👋 Move hand to rotate
+</div>
+<div id="errorMessage"></div>
+
+<!-- Three.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+<!-- MediaPipe Hands -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+<script>
+const video = document.getElementById("video");
+const gestureHint = document.getElementById("gestureHint");
+const errorMessage = document.getElementById("errorMessage");
+const uploadContainer = document.getElementById("uploadContainer");
+const fileInput = document.getElementById("fileInput");
+const uploadButton = document.getElementById("uploadButton");
+
+/* ---------- THREE.JS SETUP ---------- */
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x222222);
+
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+// ADD LIGHTS
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+scene.add(ambientLight);
+const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+directionalLight.position.set(5, 5, 5);
+scene.add(directionalLight);
+const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.5);
+directionalLight2.position.set(-5, -3, -5);
+scene.add(directionalLight2);
+
+let model;
+camera.position.z = 3;
+
+/* ---------- FILE UPLOAD HANDLING ---------- */
+uploadButton.addEventListener('click', () => {
+  fileInput.click();
+});
+
+fileInput.addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (file) {
+    loadModelFromFile(file);
+  }
+});
+
+// Also support drag and drop
+uploadContainer.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  uploadContainer.style.borderColor = '#4a90e2';
+});
+
+uploadContainer.addEventListener('dragleave', (e) => {
+  uploadContainer.style.borderColor = '#555';
+});
+
+uploadContainer.addEventListener('drop', (e) => {
+  e.preventDefault();
+  uploadContainer.style.borderColor = '#555';
+  const file = e.dataTransfer.files[0];
+  if (file && (file.name.endsWith('.glb') || file.name.endsWith('.gltf'))) {
+    loadModelFromFile(file);
+  } else {
+    showError('Please drop a GLB or GLTF file');
+  }
+});
+
+function showError(message) {
+  errorMessage.textContent = message;
+  errorMessage.style.display = 'block';
+  setTimeout(() => {
+    errorMessage.style.display = 'none';
+  }, 5000);
+}
+
+function loadModelFromFile(file) {
+  gestureHint.textContent = 'Loading model...';
+  
+  // Load GLTFLoader script if not already loaded
+  if (typeof THREE.GLTFLoader === 'undefined') {
+    const loaderScript = document.createElement('script');
+    loaderScript.src = 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js';
+    loaderScript.onload = () => processFile(file);
+    loaderScript.onerror = () => {
+      showError('Failed to load GLTFLoader library');
+      gestureHint.textContent = 'Error loading loader';
+    };
+    document.head.appendChild(loaderScript);
+  } else {
+    processFile(file);
+  }
+}
+
+function processFile(file) {
+  const reader = new FileReader();
+  
+  reader.onload = (e) => {
+    const arrayBuffer = e.target.result;
+    const blob = new Blob([arrayBuffer]);
+    const url = URL.createObjectURL(blob);
+    
+    const loader = new THREE.GLTFLoader();
+    
+    loader.load(
+      url,
+      (gltf) => {
+        // Remove old model if exists
+        if (model) {
+          scene.remove(model);
+        }
+        
+        model = gltf.scene;
+        
+        // Center and scale the model
+        const box = new THREE.Box3().setFromObject(model);
+        const center = box.getCenter(new THREE.Vector3());
+        const size = box.getSize(new THREE.Vector3());
+        
+        // Scale model to fit in view
+        const maxDim = Math.max(size.x, size.y, size.z);
+        const scale = 2 / maxDim;
+        model.scale.multiplyScalar(scale);
+        
+        // Center the model
+        box.setFromObject(model);
+        box.getCenter(center);
+        model.position.sub(center);
+        
+        scene.add(model);
+        
+        // Hide upload container
+        uploadContainer.classList.add('hidden');
+        
+        gestureHint.textContent = 'Model loaded - Show your hand';
+        
+        // Clean up the blob URL
+        URL.revokeObjectURL(url);
+      },
+      (xhr) => {
+        const percent = Math.round((xhr.loaded / xhr.total) * 100);
+        gestureHint.textContent = `Loading model: ${percent}%`;
+      },
+      (error) => {
+        console.error('Error loading model:', error);
+        showError('Failed to load model. Make sure it\'s a valid GLB/GLTF file.');
+        gestureHint.textContent = 'Error loading model';
+      }
+    );
+  };
+  
+  reader.onerror = () => {
+    showError('Failed to read file');
+    gestureHint.textContent = 'Error reading file';
+  };
+  
+  reader.readAsArrayBuffer(file);
+}
+
+/* ---------- MEDIAPIPE HANDS ---------- */
+const hands = new Hands({
+  locateFile: (file) =>
+    `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
+});
+
+hands.setOptions({
+  maxNumHands: 1,
+  modelComplexity: 1,
+  minDetectionConfidence: 0.7,
+  minTrackingConfidence: 0.7,
+});
+
+hands.onResults(onResults);
+
+/* ---------- CAMERA ---------- */
+const cameraFeed = new Camera(video, {
+  onFrame: async () => {
+    await hands.send({ image: video });
+  },
+  width: 640,
+  height: 480,
+});
+
+cameraFeed.start().catch((err) => {
+  console.error('Camera error:', err);
+  showError('Failed to access camera. Please grant camera permissions.');
+});
+
+/* ---------- VARIABLES FOR GESTURE CONTROL ---------- */
+let lastIndexX = null;
+let lastIndexY = null;
+let rotationY = 0;
+let rotationX = 0;
+let zoom = 3;
+
+function distance(p1, p2) {
+  return Math.sqrt(
+    (p1.x - p2.x) ** 2 +
+    (p1.y - p2.y) ** 2 +
+    (p1.z - p2.z) ** 2
+  );
+}
+
+function isFist(landmarks) {
+  const fingers = [
+    [8, 6],   // index
+    [12, 10], // middle
+    [16, 14], // ring
+    [20, 18], // pinky
+  ];
+
+  let foldedCount = 0;
+  for (const [tip, pip] of fingers) {
+    if (landmarks[tip].y > landmarks[pip].y) {
+      foldedCount++;
+    }
+  }
+
+  return foldedCount >= 3;
+}
+
+function onResults(results) {
+  if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+    lastIndexX = null;
+    lastIndexY = null;
+    if (model) gestureHint.textContent = "No hand detected";
+    return;
+  }
+
+  if (!model) return;
+  
+  const landmarks = results.multiHandLandmarks[0];
+  const indexTip = landmarks[8];
+  const thumbTip = landmarks[4];
+
+  if (lastIndexX === null || lastIndexY === null) {
+    lastIndexX = indexTip.x;
+    lastIndexY = indexTip.y;
+    gestureHint.textContent = "Tracking hand...";
+    return;
+  }
+
+  // Rotation
+  const deltaX = lastIndexX - indexTip.x;
+  const deltaY = indexTip.y - lastIndexY;
+
+  rotationY += deltaX * Math.PI * 2;
+  rotationX += deltaY * Math.PI * 2;
+
+  lastIndexX = indexTip.x;
+  lastIndexY = indexTip.y;
+
+  const pinchDist = distance(thumbTip, indexTip);
+  const fist = isFist(landmarks);
+
+  let gestureText = "Move hand to rotate";
+
+  if (pinchDist < 0.07) {
+    zoom -= 0.08;
+    gestureText = "🤏 Zoom In (Pinch)";
+  } else if (fist) {
+    zoom += 0.08;
+    gestureText = "✊ Zoom Out (Fist)";
+  }
+
+  zoom = Math.min(Math.max(zoom, 1.5), 7);
+
+  model.rotation.y = rotationY;
+  model.rotation.x = rotationX;
+  camera.position.z = zoom;
+
+  gestureHint.textContent = gestureText;
+}
+
+/* ---------- RENDER LOOP ---------- */
+function animate() {
+  requestAnimationFrame(animate);
+  renderer.render(scene, camera);
+}
+
+animate();
+
+/* ---------- WINDOW RESIZE ---------- */
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+
+</body>
+</html>
